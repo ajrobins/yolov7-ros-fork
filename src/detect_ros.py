@@ -16,8 +16,7 @@ import rospy
 
 from vision_msgs.msg import Detection2DArray, Detection2D, BoundingBox2D
 from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
-
+from cv_bridge import CvBridge, CvBridgeError
 
 def parse_classes_file(path):
     classes = []
@@ -54,6 +53,7 @@ class YoloV7:
         self.device = device
         self.model = attempt_load(weights, map_location=device)
         self.model.eval()
+        self.bridge = CvBridge()
 
     @torch.no_grad()
     def inference(self, img: torch.Tensor):
@@ -153,6 +153,7 @@ class Yolov7Publisher:
 
         # publishing
         detection_msg = create_detection_msg(img_msg, detections)
+        detection_msg.header.frame_id = "xtion_rgb_optical_frame"
         self.detection_publisher.publish(detection_msg)
 
         # visualizing if required
@@ -162,8 +163,18 @@ class Yolov7Publisher:
             classes = [int(c) for c in detections[:, 5].tolist()]
             vis_img = draw_detections(np_img_orig, bboxes, classes,
                                       self.class_labels)
-            vis_msg = self.bridge.cv2_to_imgmsg(vis_img)
-            self.visualization_publisher.publish(vis_msg)
+           # Convert OpenCV image to ROS image message
+            try:
+                vis_msg = self.bridge.cv2_to_imgmsg(vis_img, encoding="bgr8")
+            except CvBridgeError as e:
+                print(e)
+
+            # Set the timestamp of the message
+            vis_msg.header.stamp = rospy.Time.now()
+
+            # Publish the message to a topic
+            if self.visualization_publisher:
+                self.visualization_publisher.publish(vis_msg)
 
 
 if __name__ == "__main__":
